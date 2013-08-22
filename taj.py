@@ -2,7 +2,15 @@ from collections import Counter, defaultdict, namedtuple
 import math
 import random
 
-from euclid import Vector2 as Position
+from euclid import Vector2
+
+
+class Position(Vector2):
+    def frame(self):
+        return {
+            'x': self.x,
+            'y': self.y,
+        }
 
 
 class Board(object):
@@ -34,6 +42,20 @@ class Board(object):
         b = b.position
         return math.hypot(b.x - a.x, b.y - a.y)
 
+    def tick(self):
+        for obj in self._objects:
+            if hasattr(obj, 'tick'):
+                obj.tick()
+
+    def frame(self):
+        d = {
+            'size': self.size,
+            'objects': [],
+        }
+        for obj in self._objects:
+            d['objects'].append(obj.frame())
+        return d
+
 
 class Resource(object):
     # TODO block instantiation?
@@ -54,6 +76,13 @@ class Resource(object):
             self.remaining -= amount
             return amount
 
+    def frame(self):
+        return {
+            'type': self.__class__.__name__,
+            'position': self.position.frame(),
+            'remaining': self.remaining,
+        }
+
 
 class Wood(Resource): pass
 
@@ -65,16 +94,43 @@ class Stone(Resource): pass
 
 
 class Castle(object):
-    def __init__(self, position):
+    def __init__(self, name, position):
+        self.name = name
         self.position = position
         self.defense = 10
         self.resources = Counter()
+
+    def tick(self): pass
+
+    def frame(self):
+        return {
+            'type': self.__class__.__name__,
+            'name': self.name,
+            'position': self.position.frame(),
+            'defense': self.defense,
+            'resources': {k.__class__.__name__: c for k, c in self.resources.items()},
+        }
 
 
 class Clan(object):
     def __init__(self, name):
         self.name = name
+        # TODO replace with "children" so that all scene graph nodes are consistent
+        #      which will make frame and tick easier
         self.castles = []
+        self.workers = []
+
+    def tick(self):
+        for obj in self.castles + self.workers:
+            obj.tick()
+
+    def frame(self):
+        return {
+            'type': self.__class__.__name__,
+            'name': self.name,
+            'castles': [castle.frame() for castle in self.castles],
+            'workers': [worker.frame() for worker in self.workers],
+        }
 
 
 class Peon(object):
@@ -94,6 +150,14 @@ class Peon(object):
         direction = target.position - self.position
         self.position += direction.normalized() * self.movement_speed
 
+    def frame(self):
+        return {
+            'type': self.__class__.__name__,
+            'position': self.position.frame(),
+            'health': self.health,
+            'movement_speed': self.movement_speed,
+        }
+
 
 class Worker(Peon):
     # TODO block instantiation?
@@ -105,6 +169,16 @@ class Worker(Peon):
         self.capacity = 10
         self.collected = 0
         self.collecting = True
+
+    def frame(self):
+        d = super(Worker, self).frame()
+        d.update({
+            'collection_speed': self.collection_speed,
+            'capacity': self.capacity,
+            'collected': self.collected,
+            'collecting': self.collecting,
+        })
+        return d
 
     def unload(self, castle):
         castle.resources[self.resource_type] += self.collected
@@ -133,6 +207,7 @@ class Worker(Peon):
         #      could model this as "worker needs food to survive,
         #      so if it hasn't returned
         #      to the castle in X days, it dies"
+        #      possibly they will defect to another clan?
 
         if self.collecting:
             target = self.nearest_target()
